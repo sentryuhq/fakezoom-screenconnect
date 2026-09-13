@@ -31,7 +31,11 @@ Do not execute anything from this repo. Do not visit the listed domains. All net
 | **Sophistication** | Low–Medium (2/5) — commodity dropper kit, legitimate RMM abuse |
 | **Primary risk** | Full remote desktop control + persistence, not automated data theft |
 
-Two near-identical `.bat` loader variants were recovered, both self-elevating via UAC and both downloading the same payload from the same infrastructure. Static analysis of the final MSI confirmed it is the **genuine, unmodified ScreenConnect (ConnectWise Control) installer** — reconfigured via install-time parameters to connect to attacker-controlled relay infrastructure. This is a classic **"RMM-as-a-RAT"** access-broker pattern: no custom malware code, just a signed legitimate tool with malicious configuration.
+Two near-identical `.bat` loader variants were recovered during analysis, both self-elevating via UAC and both downloading the same payload from the same infrastructure. Static analysis of the final MSI confirmed it is the **genuine, unmodified ScreenConnect (ConnectWise Control) installer** — reconfigured via install-time parameters to connect to attacker-controlled relay infrastructure. This is a classic **"RMM-as-a-RAT"** access-broker pattern: no custom malware code, just a signed legitimate tool with malicious configuration.
+
+> **Note:** only the deobfuscated/clear version of the loader is included in this repository, for readability and to avoid distributing a directly copy-pasteable obfuscated dropper. The obfuscation differences between the two variants encountered are described below for reference.
+
+> **Note:** the `Zoom_Update_V0226.msi` payload itself is also included in this repository, password-protected (`infected`) inside a zip archive, for researchers who want to reproduce the static/dynamic analysis. Do not extract or run it outside an isolated VM/sandbox.
 
 ---
 
@@ -238,22 +242,6 @@ rule Network_IOC_FakeZoomInstaller_C2
 | Payload choice | Smart — reuses a signed, trusted RMM tool instead of custom malware |
 
 **Conclusion:** likely a **commodity dropper kit**, reused by a moderately-skilled operator rather than a custom build from an advanced actor. The social-engineering design (fake update, fake SharePoint host) is more mature than the loader's software engineering.
-
----
-
-## 📁 Repository Structure
-
-```
-.
-├── README.md
-├── loaders/
-│   ├── variant1_obfuscated.bat.txt   (defanged, non-executable)
-│   └── variant2_cleartext.bat.txt    (defanged, non-executable)
-├── yara/
-│   ├── dropper_bat_fakezoom.yar
-│   └── network_ioc_fakezoom.yar
-└── iocs.md
-```
 
 ---
 
