@@ -1,4 +1,4 @@
-# 🎣 Fake Zoom Update → ScreenConnect RAT Deployment
+# 🎣 Fake "Zoom Update" MSI → ScreenConnect RAT Deployment
 
 ![Threat Level](https://img.shields.io/badge/threat%20level-medium-yellow)
 ![Type](https://img.shields.io/badge/type-RMM%20abuse%20%2F%20RAT-orange)
@@ -6,16 +6,16 @@
 ![Platform](https://img.shields.io/badge/platform-Windows-blue)
 ![Status](https://img.shields.io/badge/status-active%20research-brightgreen)
 
-> Educational, defensive-security threat intelligence writeup documenting a phishing campaign that abuses a legitimate remote-access tool (ScreenConnect) via a fake "Zoom Update" lure and an obfuscated BAT/PowerShell dropper chain.
+> Educational, defensive-security threat intelligence writeup documenting an obfuscated BAT/PowerShell dropper chain that installs a legitimate remote-access tool (ScreenConnect) reconfigured to give an attacker full remote control, delivered via a fake "Zoom Update" lure hosted on a typosquatted SharePoint-lookalike domain.
 
 ---
 
 ## ⚠️ Disclaimer
 
 This repository exists for **educational, malware-analysis, and defensive-security purposes only**.
-No functional malicious payload, live command, or working C2 client is included or reproduced here.
-All indicators are provided to support detection engineering, threat hunting, and awareness — **not** to enable reuse.
-Do not execute anything from this repo. Do not visit the listed domains. All IOCs are defanged.
+No functional malicious payload or working C2 client is included or reproduced here.
+All indicators are provided to support detection engineering and threat hunting — **not** to enable reuse.
+Do not execute anything from this repo. Do not visit the listed domains. All network indicators are defanged.
 
 ---
 
@@ -23,15 +23,15 @@ Do not execute anything from this repo. Do not visit the listed domains. All IOC
 
 | | |
 |---|---|
-| **Campaign type** | Phishing → RMM tool abuse (initial access) |
-| **Lure** | Fake "Zoom" software update |
-| **Delivery** | Fake CAPTCHA page ("ClickFix" technique) → obfuscated `.bat` loader |
+| **Campaign type** | Trojanized software update → RMM tool abuse (initial access) |
+| **Lure** | Fake "Zoom" update package |
+| **Delivery** | Obfuscated `.bat` loader → dynamically generated PowerShell → silent MSI install |
 | **Final payload** | Legitimate, unmodified **ScreenConnect Client** installer, reconfigured with attacker infrastructure |
 | **Attacker C2** | `relay.hochoukisenmontenmoriyamas[.]click:8041` |
 | **Sophistication** | Low–Medium (2/5) — commodity dropper kit, legitimate RMM abuse |
 | **Primary risk** | Full remote desktop control + persistence, not automated data theft |
 
-The infection starts with a **ClickFix-style fake CAPTCHA** that tricks the user into pasting and running a PowerShell one-liner via `Win+R`. That command triggers a self-elevating `.bat` loader, which silently downloads and installs a legitimate **ScreenConnect (ConnectWise Control)** client — reconfigured to phone home to attacker-controlled relay infrastructure. This is a classic **"RMM-as-a-RAT"** access-broker pattern: no custom malware code, just a signed legitimate tool with malicious configuration.
+Two near-identical `.bat` loader variants were recovered, both self-elevating via UAC and both downloading the same payload from the same infrastructure. Static analysis of the final MSI confirmed it is the **genuine, unmodified ScreenConnect (ConnectWise Control) installer** — reconfigured via install-time parameters to connect to attacker-controlled relay infrastructure. This is a classic **"RMM-as-a-RAT"** access-broker pattern: no custom malware code, just a signed legitimate tool with malicious configuration.
 
 ---
 
@@ -39,53 +39,23 @@ The infection starts with a **ClickFix-style fake CAPTCHA** that tricks the user
 
 ```mermaid
 flowchart TD
-    A[Victim visits fake site] --> B[Fake Cloudflare CAPTCHA page]
-    B --> C[Victim clicks 'I'm not a robot']
-    C --> D[Malicious command silently copied to clipboard]
-    D --> E[Page instructs: Win+R -> Ctrl+V -> Enter]
-    E --> F[Victim manually executes PowerShell command]
-    F --> G[Obfuscated .bat loader runs]
-    G --> H{Already elevated?}
-    H -- No --> I[Self-relaunch via Start-Process -Verb RunAs<br/>UAC prompt shown]
-    I --> G
-    H -- Yes --> J[Generates temp .ps1 dynamically]
-    J --> K[Downloads Zoom_Update_V0226.msi<br/>from fake SharePoint domain]
-    K --> L[Silent install: msiexec /quiet /norestart]
-    L --> M[ScreenConnect Client service installed]
-    M --> N[Beacons to attacker relay server]
-    N --> O[Attacker has full remote desktop access]
-    G --> P[Cleanup: temp files deleted]
+    A[".bat loader obtained/executed"] --> B{"Already elevated?<br/>(arg == 'hidden')"}
+    B -- No --> C["Self-relaunch via<br/>Start-Process -Verb RunAs<br/>(UAC prompt shown)"]
+    C --> B
+    B -- Yes --> D["Generate randomly-named<br/>.ps1 in %TEMP%"]
+    D --> E["Download Zoom_Update_V0226.msi<br/>from fake SharePoint domain"]
+    E --> F["Silent install:<br/>msiexec /quiet /norestart"]
+    F --> G["ScreenConnect Client<br/>service installed"]
+    G --> H["Beacons to attacker relay server"]
+    H --> I["Attacker has full<br/>remote desktop access"]
+    D --> J["Cleanup: temp .ps1 / .msi deleted"]
 ```
 
 ---
 
-## 🎭 Stage 1 — The Fake CAPTCHA (ClickFix)
+## 🧱 Stage 1 — The Obfuscated BAT Loader
 
-A fake Cloudflare Turnstile-style verification page. No real technical exploit — pure social engineering.
-
-**Deceptive elements observed:**
-- Dynamically fetched favicon based on a `site` URL parameter (spoofs any brand)
-- Fake, randomly-generated Cloudflare "Ray ID"
-- Fake, randomly-generated "reCAPTCHA Verification ID"
-- Full i18n support (English/Russian detected via `navigator.languages`) → multi-region targeting
-- Convincing animation sequence: preloader → checkbox → spinner → fake "success" checkmark
-
-**The actual mechanism:**
-- On checkbox click, JavaScript silently writes a malicious command to the clipboard (`document.execCommand('copy')` / Clipboard API)
-- A `copy` event listener **overwrites clipboard contents** even if the user tries to copy something else in the meantime
-- The page then instructs the victim: `Win+R` → `Ctrl+V` → `Enter`
-- Because a human manually triggers execution, this bypasses many technical controls that only watch for script-initiated process launches
-
-| MITRE ATT&CK | Technique |
-|---|---|
-| T1204.004 | User Execution: Malicious Copy and Paste |
-| T1027 | Obfuscated Files or Information (page-level social engineering) |
-
----
-
-## 🧱 Stage 2 — The Obfuscated BAT Loader
-
-Two near-identical variants were recovered (same campaign, re-obfuscated loader):
+Two variants of the same loader were recovered — same campaign, re-obfuscated to evade hash-based detection:
 
 ```mermaid
 flowchart LR
@@ -106,7 +76,7 @@ flowchart LR
 **Behavior:**
 1. **Self-elevation** — checks its own argument; if not `"hidden"`, relaunches itself via `Start-Process -Verb RunAs`, triggering the Windows UAC prompt
 2. **Dynamic script generation** — writes a randomly-named `.ps1` to `%TEMP%` at runtime (evades static file signatures)
-3. **Fake SharePoint domain** — downloads the MSI from a typosquatted domain impersonating Microsoft SharePoint
+3. **Fake SharePoint domain** — downloads the MSI from a typosquatted domain impersonating Microsoft SharePoint (`sharepoint-externals.com`)
 4. **Silent MSI install** — `msiexec /i ... /quiet /norestart /L*v <logfile>`
 5. **Anti-forensics cleanup** — deletes the generated `.ps1` and downloaded `.msi` after execution
 
@@ -120,9 +90,9 @@ flowchart LR
 
 ---
 
-## 📦 Stage 3 — The Payload: Legitimate ScreenConnect, Reconfigured
+## 📦 Stage 2 — The Payload: Legitimate ScreenConnect, Reconfigured
 
-Static analysis of the MSI (via `lessmsi`) confirmed this is the **genuine, unmodified ScreenConnect Client installer** — not a fork or patched binary. The abuse is entirely in the configuration.
+Static analysis of the MSI (via `lessmsi`) confirmed this is the **genuine, unmodified ScreenConnect Client installer** — not a fork or patched binary. The abuse is entirely in the configuration, not the code.
 
 **Key MSI properties recovered:**
 
@@ -140,7 +110,7 @@ Static analysis of the MSI (via `lessmsi`) confirmed this is the **genuine, unmo
 ```
 This single string configures the client to phone home to the attacker's own ScreenConnect relay/panel, using an attacker-specific instance ID (`be1534bbe323c228`).
 
-**Why this matters:** no custom code needs to be reverse-engineered — the "malware" is a legitimately signed product, which lets it slip past many AV/EDR products that trust its publisher signature. This is the well-documented **RMM abuse / access-broker pattern** used as an initial-access vector, frequently as a precursor to ransomware or manual data theft.
+**MSI Custom Actions observed** (`CustomAction` table) — these match the standard, official ScreenConnect installer structure (service install/config, process termination for updates, client launch). No custom/injected code was found; the executable payload itself is stock ScreenConnect.
 
 | MITRE ATT&CK | Technique |
 |---|---|
@@ -149,7 +119,7 @@ This single string configures the client to phone home to the attacker's own Scr
 
 ---
 
-## 🎯 Why "It Doesn't Steal Anything" Is the Wrong Takeaway
+## 🎯 Why "It Doesn't Steal Anything Itself" Is the Wrong Takeaway
 
 ScreenConnect has no built-in credential dumper, browser-cookie grabber, or keylogger. But it doesn't need one:
 
@@ -158,7 +128,7 @@ ScreenConnect has no built-in credential dumper, browser-cookie grabber, or keyl
 - **Remote shell access** — the operator can launch any secondary tool (credential dumpers, ransomware, lateral movement frameworks) manually, once inside
 - **Persistent Windows service** — unlike a one-shot stealer, the access stays open until removed
 
-This is an **access broker tool**: the real damage happens *after* install, driven by a human operator, not by the installer itself.
+This is an **access broker tool**: the real damage happens *after* install, driven by a human operator, not by the installer itself. This pattern is frequently seen as a precursor to ransomware or manual data theft in documented incidents.
 
 ---
 
@@ -258,7 +228,7 @@ rule Network_IOC_FakeZoomInstaller_C2
 
 | Factor | Assessment |
 |---|---|
-| Obfuscation | Trivial (string concat, or none at all in v2) |
+| Obfuscation | Trivial (string concat, or none at all in variant 2) |
 | Payload encryption/packing | None |
 | Anti-VM / anti-sandbox | None observed |
 | C2 infrastructure | Static, reused across variants — no DGA/rotation |
@@ -267,7 +237,7 @@ rule Network_IOC_FakeZoomInstaller_C2
 | Social engineering quality | Well executed (Zoom + SharePoint lure is coherent for corporate targets) |
 | Payload choice | Smart — reuses a signed, trusted RMM tool instead of custom malware |
 
-**Conclusion:** likely a **commodity dropper kit**, reused by a moderately-skilled operator rather than a custom build from an advanced actor. The social-engineering design is more mature than the loader's software engineering.
+**Conclusion:** likely a **commodity dropper kit**, reused by a moderately-skilled operator rather than a custom build from an advanced actor. The social-engineering design (fake update, fake SharePoint host) is more mature than the loader's software engineering.
 
 ---
 
@@ -282,17 +252,14 @@ rule Network_IOC_FakeZoomInstaller_C2
 ├── yara/
 │   ├── dropper_bat_fakezoom.yar
 │   └── network_ioc_fakezoom.yar
-├── iocs.md
-└── screenshots/
-    └── fake_captcha_page.png
+└── iocs.md
 ```
 
 ---
 
-## 📚 References & Further Reading
+## 📚 References
 
-- ClickFix technique — widely documented across the security research community as a fake-CAPTCHA social engineering pattern
-- ScreenConnect/RMM abuse as initial access — documented in multiple public vendor threat reports (Huntress, Sophos, and others track this pattern in ransomware precursor activity)
+- ScreenConnect/RMM abuse as an initial access vector is a documented pattern across multiple public vendor threat reports, frequently observed as a precursor to ransomware or manual data theft
 - MalwareBazaar submission guidelines: https://bazaar.abuse.ch/
 
 ---
